@@ -17,8 +17,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
 	CoordinatorEntity,
 	DataUpdateCoordinator,
-	UpdateFailed,
 )
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import EntityCategory
 
 from . import DOMAIN
@@ -202,154 +202,138 @@ class ArrisDataUpdateCoordinator(DataUpdateCoordinator):
 
 	async def _async_update_data(self) -> dict[str, Any]:
 		"""Update data via library."""
+		session = async_get_clientsession(self.hass)
+		data: dict[str, Any] = {}
+
+		# 1) Try the connection_troubleshoot_data endpoint which provides simple modem state
 		try:
-			async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-				data: dict[str, Any] = {}
+			ct_url = f"http://{self.host}/php/connection_troubleshoot_data.php"
+			payload = {"userData": json.dumps({"connectionData": ""})}
+			async with session.post(ct_url, data=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+				if resp.status == 200:
+					try:
+						json_data = await resp.json()
+						_LOGGER.debug("connection_troubleshoot_data returned: %s", json_data)
+						if isinstance(json_data, dict):
+							oper = json_data.get("js_cm_oper_value")
+							reg = json_data.get("js_cm_reg_value")
+							wan_ip_mode = json_data.get("js_wan_ip_prov_mode")
+							fail_safe = json_data.get("js_fail_safe_mode")
+							no_rf = json_data.get("js_NoRF_Detected")
 
-				# 1) Try the connection_troubleshoot_data endpoint which provides simple modem state
-				try:
-					ct_url = f"http://{self.host}/php/connection_troubleshoot_data.php"
-					payload = {"userData": json.dumps({"connectionData": ""})}
-					async with session.post(ct_url, data=payload) as resp:
-						if resp.status == 200:
-							try:
-								json_data = await resp.json()
-								_LOGGER.debug("connection_troubleshoot_data returned: %s", json_data)
-								# Common keys: js_cm_oper_value, js_cm_reg_value, js_NoRF_Detected, js_wan_ip_prov_mode
-								if isinstance(json_data, dict):
-									oper = json_data.get("js_cm_oper_value")
-									reg = json_data.get("js_cm_reg_value")
-									wan_ip_mode = json_data.get("js_wan_ip_prov_mode")
-									fail_safe = json_data.get("js_fail_safe_mode")
-									no_rf = json_data.get("js_NoRF_Detected")
-
-									# Simple human readable mapping for operational status
-									if oper is not None:
-										try:
-											oper_val = int(oper)
-											if oper_val >= 3:
-												data["cable_modem_status"] = "Online"
-											else:
-												data["cable_modem_status"] = "Offline"
-										except (ValueError, TypeError):
-											data["cable_modem_status"] = str(oper)
-
-									# Registration status mapping
-									if reg is not None:
-										try:
-											reg_val = int(reg)
-											reg_map = {
-												0: "Unregistered",
-												1: "Other",
-												2: "Registered",
-												3: "Not Registered",
-												4: "Registration Complete",
-												5: "Access Denied",
-												6: "Operational",
-											}
-											data["cable_modem_registration"] = reg_map.get(reg_val, f"Unknown ({reg_val})")
-										except (ValueError, TypeError):
-											data["cable_modem_registration"] = str(reg)
-
-									# WAN IP provision mode mapping
-									if wan_ip_mode is not None:
-										try:
-											mode_val = int(wan_ip_mode)
-											mode_map = {
-												0: "DHCP",
-												1: "Static",
-												2: "PPPoE",
-											}
-											data["wan_ip_provision_mode"] = mode_map.get(mode_val, f"Unknown ({mode_val})")
-										except (ValueError, TypeError):
-											data["wan_ip_provision_mode"] = str(wan_ip_mode)
-
-									# Fail safe mode
-									if fail_safe is not None:
-										data["fail_safe_mode"] = "Active" if str(fail_safe) == "1" else "Inactive"
-
-									# No RF detected
-									if no_rf is not None:
-										data["no_rf_detected"] = "Yes" if str(no_rf) == "1" else "No"
-
-							except (ValueError, KeyError, TypeError) as err:
-								_LOGGER.debug("Error parsing connection_troubleshoot_data JSON: %s", err)
-						else:
-							_LOGGER.debug("%s returned HTTP %s", ct_url, resp.status)
-				except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-					_LOGGER.debug("Error calling connection_troubleshoot_data: %s", err)
-
-				# 2) Try ajaxGet_device_networkstatus_data.php - contains all status and config data
-				try:
-					dn_url = f"http://{self.host}/php/ajaxGet_device_networkstatus_data.php"
-					payload = {"userData": json.dumps({"networkStatusData": ""})}
-					async with session.post(dn_url, data=payload) as resp:
-						_LOGGER.debug("ajaxGet_device_networkstatus_data.php status: %s", resp.status)
-						if resp.status == 200:
-							# This endpoint returns JSON array with all the data we need
-							j = await resp.json()
-							_LOGGER.debug("ajaxGet_device_networkstatus_data returned JSON array with length: %s", len(j) if hasattr(j, '__len__') else 'N/A')
-							_LOGGER.debug("Full JSON response: %s", j)
-							try:
-								if isinstance(j, list) and len(j) >= 30:
-									_LOGGER.debug("JSON array meets requirements (>=30 elements), extracting data")
-									# Extract config and status data by index
-									# Index mapping based on endpoint response
-									data["primary_downstream_channel"] = j[2] if j[2] == "Locked" else None
-									data["isp_provider"] = self._map_customer_id(j[4]) if isinstance(j[4], int) else None
-									data["network_access"] = j[5]
-									data["max_cpes"] = j[6]
-									data["baseline_privacy"] = j[7]
-									data["docsis_version"] = j[8]  # Also set as docsis_version for compatibility
-									data["docsis_mode"] = j[8]
-									data["config_file"] = j[9]
-									data["primary_downstream_sfid"] = j[10]
-									data["primary_downstream_max_traffic_rate"] = j[11]
-									data["primary_downstream_max_traffic_burst"] = j[12]
-									data["primary_downstream_min_traffic_rate"] = j[13]
-									data["primary_upstream_sfid"] = j[14]
-									data["primary_upstream_max_traffic_rate"] = j[15]
-									data["primary_upstream_max_traffic_burst"] = j[16]
-									data["primary_upstream_min_traffic_rate"] = j[17]
-									data["primary_upstream_max_concatenated_burst"] = j[18]
-									data["primary_upstream_scheduling_type"] = j[19]
-
-									# Channel counts are provided directly at the end
-									# Array indices: [25]=US 3.0, [26]=DS 3.0, [27]=DS 3.1, [28]=US 3.1
-									if len(j) >= 29:
-										upstream_3_0_count = int(j[25]) if str(j[25]).isdigit() else 0
-										downstream_3_0_count = int(j[26]) if str(j[26]).isdigit() else 0
-										downstream_3_1_count = int(j[27]) if str(j[27]).isdigit() else 0
-										upstream_3_1_count = int(j[28]) if str(j[28]).isdigit() else 0
-
-										data['docsis_3_0_downstream'] = downstream_3_0_count
-										data['docsis_3_0_upstream'] = upstream_3_0_count
-										data['docsis_3_1_downstream'] = downstream_3_1_count
-										data['docsis_3_1_upstream'] = upstream_3_1_count
-										data['total_downstream_channels'] = downstream_3_0_count + downstream_3_1_count
-										data['total_upstream_channels'] = upstream_3_0_count + upstream_3_1_count
+							if oper is not None:
+								try:
+									oper_val = int(oper)
+									if oper_val >= 3:
+										data["cable_modem_status"] = "Online"
 									else:
-										_LOGGER.warning("JSON array too short for channel counts (need >=29, got %s)", len(j))
-								else:
-									_LOGGER.warning("JSON response is not a list or too short (need >=30 elements, got type=%s, len=%s)", 
-													type(j).__name__, len(j) if hasattr(j, '__len__') else 'N/A')
+										data["cable_modem_status"] = "Offline"
+								except (ValueError, TypeError):
+									data["cable_modem_status"] = str(oper)
 
-							except (ValueError, KeyError, TypeError, IndexError) as err:
-								_LOGGER.error("Error parsing ajaxGet_device_networkstatus_data JSON: %s", err)
+							if reg is not None:
+								try:
+									reg_val = int(reg)
+									reg_map = {
+										0: "Unregistered",
+										1: "Other",
+										2: "Registered",
+										3: "Not Registered",
+										4: "Registration Complete",
+										5: "Access Denied",
+										6: "Operational",
+									}
+									data["cable_modem_registration"] = reg_map.get(reg_val, f"Unknown ({reg_val})")
+								except (ValueError, TypeError):
+									data["cable_modem_registration"] = str(reg)
+
+							if wan_ip_mode is not None:
+								try:
+									mode_val = int(wan_ip_mode)
+									mode_map = {
+										0: "DHCP",
+										1: "Static",
+										2: "PPPoE",
+									}
+									data["wan_ip_provision_mode"] = mode_map.get(mode_val, f"Unknown ({mode_val})")
+								except (ValueError, TypeError):
+									data["wan_ip_provision_mode"] = str(wan_ip_mode)
+
+							if fail_safe is not None:
+								data["fail_safe_mode"] = "Active" if str(fail_safe) == "1" else "Inactive"
+
+							if no_rf is not None:
+								data["no_rf_detected"] = "Yes" if str(no_rf) == "1" else "No"
+
+					except (ValueError, KeyError, TypeError) as err:
+						_LOGGER.debug("Error parsing connection_troubleshoot_data JSON: %s", err)
+				else:
+					_LOGGER.debug("%s returned HTTP %s", ct_url, resp.status)
+		except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+			_LOGGER.debug("Error calling connection_troubleshoot_data: %s", err)
+
+		# 2) Try ajaxGet_device_networkstatus_data.php - contains all status and config data
+		try:
+			dn_url = f"http://{self.host}/php/ajaxGet_device_networkstatus_data.php"
+			payload = {"userData": json.dumps({"networkStatusData": ""})}
+			async with session.post(dn_url, data=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+				_LOGGER.debug("ajaxGet_device_networkstatus_data.php status: %s", resp.status)
+				if resp.status == 200:
+					j = await resp.json()
+					_LOGGER.debug("ajaxGet_device_networkstatus_data returned JSON array with length: %s", len(j) if hasattr(j, '__len__') else 'N/A')
+					_LOGGER.debug("Full JSON response: %s", j)
+					try:
+						if isinstance(j, list) and len(j) >= 30:
+							_LOGGER.debug("JSON array meets requirements (>=30 elements), extracting data")
+							data["primary_downstream_channel"] = j[2] if j[2] == "Locked" else None
+							data["isp_provider"] = self._map_customer_id(j[4]) if isinstance(j[4], int) else None
+							data["network_access"] = j[5]
+							data["max_cpes"] = j[6]
+							data["baseline_privacy"] = j[7]
+							data["docsis_version"] = j[8]
+							data["docsis_mode"] = j[8]
+							data["config_file"] = j[9]
+							data["primary_downstream_sfid"] = j[10]
+							data["primary_downstream_max_traffic_rate"] = j[11]
+							data["primary_downstream_max_traffic_burst"] = j[12]
+							data["primary_downstream_min_traffic_rate"] = j[13]
+							data["primary_upstream_sfid"] = j[14]
+							data["primary_upstream_max_traffic_rate"] = j[15]
+							data["primary_upstream_max_traffic_burst"] = j[16]
+							data["primary_upstream_min_traffic_rate"] = j[17]
+							data["primary_upstream_max_concatenated_burst"] = j[18]
+							data["primary_upstream_scheduling_type"] = j[19]
+
+							if len(j) >= 29:
+								upstream_3_0_count = int(j[25]) if str(j[25]).isdigit() else 0
+								downstream_3_0_count = int(j[26]) if str(j[26]).isdigit() else 0
+								downstream_3_1_count = int(j[27]) if str(j[27]).isdigit() else 0
+								upstream_3_1_count = int(j[28]) if str(j[28]).isdigit() else 0
+
+								data['docsis_3_0_downstream'] = downstream_3_0_count
+								data['docsis_3_0_upstream'] = upstream_3_0_count
+								data['docsis_3_1_downstream'] = downstream_3_1_count
+								data['docsis_3_1_upstream'] = upstream_3_1_count
+								data['total_downstream_channels'] = downstream_3_0_count + downstream_3_1_count
+								data['total_upstream_channels'] = upstream_3_0_count + upstream_3_1_count
+							else:
+								_LOGGER.warning("JSON array too short for channel counts (need >=29, got %s)", len(j))
 						else:
-							_LOGGER.warning("%s returned HTTP %s", dn_url, resp.status)
-				except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-					_LOGGER.debug("Error calling ajaxGet_device_networkstatus_data: %s", err)
+							_LOGGER.warning("JSON response is not a list or too short (need >=30 elements, got type=%s, len=%s)",
+											type(j).__name__, len(j) if hasattr(j, '__len__') else 'N/A')
 
-			# Store the last update time in UTC with timezone info
-			data["last_update_time"] = datetime.now(timezone.utc)
+					except (ValueError, KeyError, TypeError, IndexError) as err:
+						_LOGGER.error("Error parsing ajaxGet_device_networkstatus_data JSON: %s", err)
+				else:
+					_LOGGER.warning("%s returned HTTP %s", dn_url, resp.status)
+		except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+			_LOGGER.debug("Error calling ajaxGet_device_networkstatus_data: %s", err)
 
-			_LOGGER.debug("Data dictionary contains %d keys", len(data))
-			return data
-		except asyncio.TimeoutError as err:
-				raise UpdateFailed(f"Timeout communicating with router at {self.host}") from err
-		except aiohttp.ClientError as err:
-				raise UpdateFailed(f"Error communicating with router: {err}") from err
+		# Store the last update time in UTC with timezone info
+		data["last_update_time"] = datetime.now(timezone.utc)
+
+		_LOGGER.debug("Data dictionary contains %d keys", len(data))
+		return data
 
 	def _map_customer_id(self, customer_id: int) -> str:
 		"""Map customer ID to ISP provider name."""

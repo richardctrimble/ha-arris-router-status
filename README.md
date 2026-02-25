@@ -4,7 +4,7 @@ A Home Assistant custom component for monitoring Arris router status via HACS.
 
 This component connects to your Arris router (ARRIS-based modem) and extracts comprehensive cable modem status, configuration, and service flow information using unauthenticated API endpoints.
 
-##Notes
+## Notes
 
 Works provided the scan interval is around a few minutes.
 
@@ -88,8 +88,4 @@ MIT License - see LICENSE file.
 
 ## Disclaimer
 
-
 Unofficial integration not affiliated with Arris. Use at your own risk.
-
-
-

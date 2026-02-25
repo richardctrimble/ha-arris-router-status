@@ -11,7 +11,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import DOMAIN
 
@@ -67,19 +67,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _test_connection(self, host: str) -> bool:
         """Test if we can connect to the router."""
+        session = async_get_clientsession(self.hass)
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                url = f"http://{host}"
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        raise CannotConnect
-                    
-                    # Check if the response contains expected Arris router content
-                    html = await response.text()
-                    if "cable modem" not in html.lower() and "docsis" not in html.lower():
-                        _LOGGER.warning("Router page doesn't contain expected Arris content")
-                    
-                    return True
+            url = f"http://{host}"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    raise CannotConnect
+
+                # Check if the response contains expected Arris router content
+                html = await response.text()
+                if "cable modem" not in html.lower() and "docsis" not in html.lower():
+                    _LOGGER.warning("Router page doesn't contain expected Arris content")
+
+                return True
         except aiohttp.ClientError as err:
             _LOGGER.error("Error connecting to router: %s", err)
             raise CannotConnect from err
