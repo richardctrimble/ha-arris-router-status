@@ -1,12 +1,9 @@
 # Arris Router Status
 
-A Home Assistant custom component for monitoring Arris router status via HACS.
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![GitHub release](https://img.shields.io/github/release/richardctrimble/ha-arris-router-status.svg)](https://github.com/richardctrimble/ha-arris-router-status/releases/)
 
-This component connects to your Arris router (ARRIS-based modem) and extracts comprehensive cable modem status, configuration, and service flow information using unauthenticated API endpoints.
-
-## Notes
-
-Works provided the scan interval is around a few minutes.
+A Home Assistant custom component for monitoring Arris router status. Connects to your Arris router (ARRIS-based modem) and extracts comprehensive cable modem status, configuration, and service flow information using unauthenticated API endpoints. Works provided the scan interval is around a few minutes.
 
 ## Features
 
@@ -34,6 +31,17 @@ Router configuration and service flow parameters from API:
 - ISP provider, network access, max CPEs, baseline privacy, DOCSIS mode, config file
 - Primary service flow parameters (SFID, traffic rates, burst limits, scheduling)
 
+## Requirements
+
+- Arris router in modem mode (ARRIS-based firmware)
+- Router accessible at configured IP address
+- No authentication required
+- Supported: Arris routers with ARRIS firmware (various models) **in modem mode only**
+- Default IP: 192.168.100.1
+- ISP detection: Virgin Media, Ziggo, Telekom Austria, Yallo, Sunrise, Virgin Media Ireland
+
+**Note**: Tested only in modem mode. Router mode functionality not tested.
+
 ## Installation
 
 ### HACS (Recommended)
@@ -50,20 +58,6 @@ Router configuration and service flow parameters from API:
 
 Add the integration and enter your router IP (default: 192.168.100.1).
 
-## Requirements
-
-- Arris router in modem mode (ARRIS-based firmware)
-- Router accessible at configured IP address
-- No authentication required
-
-## Supported Routers
-
-- Arris routers with ARRIS firmware (various models) **in modem mode only**
-- Default IP: 192.168.100.1
-- ISP detection: Virgin Media, Ziggo, Telekom Austria, Yallo, Sunrise, Virgin Media Ireland
-
-**Note**: Tested only in modem mode. Router mode functionality not tested.
-
 ## Troubleshooting
 
 ### All Sensors Show "Unavailable"
@@ -78,13 +72,9 @@ Add the integration and enter your router IP (default: 192.168.100.1).
 - Component maps known customer IDs to provider names
 - Unknown ISPs show as "Unknown ISP ID=X"
 
-## Contributing
+## Licence
 
-Fork, create feature branch, test with Arris router, submit PR.
-
-## License
-
-MIT License - see LICENSE file.
+MIT Licence - see LICENSE file.
 
 ## Disclaimer
 
