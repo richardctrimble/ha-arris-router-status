@@ -1,7 +1,7 @@
 {
   "domain": "ha_arris_router_status",
   "name": "Arris Router Status",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "documentation": "https://github.com/richardctrimble/ha-arris-router-status",
   "issue_tracker": "https://github.com/richardctrimble/ha-arris-router-status/issues",
   "dependencies": [],

@@ -37,7 +37,7 @@ Router configuration and service flow parameters from API:
 ## Installation
 
 ### HACS (Recommended)
-1. Add `https://github.com/richardctrimble/ha_arris_router_status` as custom repository
+1. Add `https://github.com/richardctrimble/ha-arris-router-status` as custom repository
 2. Install "Arris Router Status" integration
 3. Restart Home Assistant
 
