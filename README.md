@@ -74,7 +74,7 @@ Add the integration and enter your router IP (default: 192.168.100.1).
 
 ## Licence
 
-MIT Licence - see LICENSE file.
+Released under the [MIT Licence](LICENSE).
 
 ## Disclaimer
 
